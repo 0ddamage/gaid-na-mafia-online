@@ -14,7 +14,7 @@
 
 ![](_core/assets/public8.png)
 
-![](_core/assets/public9.png)
+![](_core/assets/public10.png)
 
 скачать архив можно сразу по этой ссылке: [Download ZIP](https://github.com/0ddamage/gaid-na-mafia-online/archive/refs/heads/main.zip)
 
