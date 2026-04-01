@@ -1,6 +1,20 @@
-![](_core/assets/public2.png)
+![](_core/assets/public3.png)
 
 ![](_core/assets/public1.png)
+
+![](_core/assets/public2.png)
+
+![](_core/assets/public4.png)
+
+![](_core/assets/public5.png)
+
+![](_core/assets/public6.png)
+
+![](_core/assets/public7.png)
+
+![](_core/assets/public8.png)
+
+![](_core/assets/public9.png)
 
 скачать архив можно сразу по этой ссылке: [Download ZIP](https://github.com/0ddamage/gaid-na-mafia-online/archive/refs/heads/main.zip)
 
