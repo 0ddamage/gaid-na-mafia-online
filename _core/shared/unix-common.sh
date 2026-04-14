@@ -722,12 +722,12 @@ resolve_live_jar() {
   [[ -n "$live_jar" && -f "$live_jar" ]] || die 'Не удалось найти игру Mafia Online.'
   printf '%s\n' "$live_jar"
 }
-find_preferred_clean_backup() {
+find_supported_clean_backup() {
   local candidate
   [[ -d "$BACKUP_DIR" ]] || return 1
   while IFS= read -r candidate; do
     [[ -f "$candidate" ]] || continue
-    if is_preferred_clean_sha "$(sha256_of "$candidate")"; then
+    if is_supported_clean_sha "$(sha256_of "$candidate")"; then
       printf '%s\n' "$candidate"
       return 0
     fi
@@ -754,7 +754,7 @@ request_steam_validation() {
   fi
   return 1
 }
-wait_for_preferred_live_clean() {
+wait_for_supported_live_clean() {
   local live_jar="$1"
   local timeout_sec="${2:-900}"
   local interval=5 elapsed=0 live_sha=''
@@ -764,7 +764,7 @@ wait_for_preferred_live_clean() {
   info_msg "Жду завершения проверки Steam (до ${timeout_sec} сек)..."
   while (( elapsed < timeout_sec )); do
     live_sha="$(sha256_of "$live_jar" 2>/dev/null || true)"
-    if is_preferred_clean_sha "$live_sha"; then
+    if is_supported_clean_sha "$live_sha"; then
       info_msg 'Steam-проверка завершена: clean-хэш подтверждён.'
       return 0
     fi
@@ -781,7 +781,7 @@ prepare_clean_jar() {
   load_supported_clean_shas
   mkdir -p "$(dirname "$CLEAN_JAR")" "$(dirname "$PATCHED_JAR")" "$BACKUP_DIR" "$LOG_DIR"
   if [[ -f "$CLEAN_JAR" ]]; then
-    if is_preferred_clean_sha "$(sha256_of "$CLEAN_JAR")"; then
+    if is_supported_clean_sha "$(sha256_of "$CLEAN_JAR")"; then
       return 0
     fi
     info_msg 'Локальная clean-копия устарела или изменена. Пересобираю clean автоматически.'
@@ -790,25 +790,25 @@ prepare_clean_jar() {
   resolved_clean="$(resolve_game_path_input "$supplied_clean" 2>/dev/null || true)"
   if [[ -f "$resolved_clean" ]]; then
     supplied_sha="$(sha256_of "$resolved_clean")"
-    if is_preferred_clean_sha "$supplied_sha"; then
+    if is_supported_clean_sha "$supplied_sha"; then
       cp -f "$resolved_clean" "$CLEAN_JAR"
       return 0
     fi
-    info_msg 'Хэш указанного clean-файла отличается от эталона. Ищу clean автоматически.'
+    info_msg 'Хэш указанного clean-файла отличается от списка поддерживаемых. Ищу clean автоматически.'
   fi
   live_sha="$(sha256_of "$live_jar")"
-  if is_preferred_clean_sha "$live_sha"; then
+  if is_supported_clean_sha "$live_sha"; then
     cp -f "$live_jar" "$CLEAN_JAR"
     return 0
   fi
-  backup_clean="$(find_preferred_clean_backup || true)"
+  backup_clean="$(find_supported_clean_backup || true)"
   if [[ -n "$backup_clean" ]]; then
     info_msg 'Нашёл clean в локальных backup. Использую его автоматически.'
     cp -f "$backup_clean" "$CLEAN_JAR"
     return 0
   fi
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
-    info_msg 'Не удалось подтвердить эталонный clean-хэш локально.'
+    info_msg 'Не удалось подтвердить поддерживаемый clean-хэш локально.'
     info_msg 'Режим совместимости включён: пропускаю ожидание Steam и использую текущий файл игры как clean-базу.'
     cp -f "$live_jar" "$CLEAN_JAR"
     return 0
@@ -822,7 +822,7 @@ prepare_clean_jar() {
     else
       validate_timeout=900
     fi
-    if wait_for_preferred_live_clean "$live_jar" "$validate_timeout"; then
+    if wait_for_supported_live_clean "$live_jar" "$validate_timeout"; then
       cp -f "$live_jar" "$CLEAN_JAR"
       return 0
     fi
@@ -908,8 +908,8 @@ restore_clean() {
   [[ -f "$CLEAN_JAR" ]] || die 'Локальная clean-копия не найдена. Восстанавливать нечего.'
   restore_source="$CLEAN_JAR"
   clean_sha="$(sha256_of "$restore_source")"
-  if ! is_preferred_clean_sha "$clean_sha"; then
-    backup_clean="$(find_preferred_clean_backup || true)"
+  if ! is_supported_clean_sha "$clean_sha"; then
+    backup_clean="$(find_supported_clean_backup || true)"
     if [[ -n "$backup_clean" ]]; then
       restore_source="$backup_clean"
       clean_sha="$(sha256_of "$restore_source")"

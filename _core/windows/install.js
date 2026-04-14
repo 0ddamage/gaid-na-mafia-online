@@ -1,9 +1,9 @@
 var APP_ID = "1906220";
 
 var RELEASE_CERT_SHA256 = "fbf0ce154b5e4d873f5212bdef9aa3d7e61ac7ca496d1feadad47570b9a2e940";
-var PATCHER_JAR_SHA256 = "37aef7e53d26d39648550c1222cae16746ca78da7571b1ac722984a4ce4f1007";
-var PATCHER_SIG_SHA256 = "126d2dd42ab722cc85d2e6930afb4e11346687dbe2fb1ed163c684cdbeef2c54";
-var CLEAN_HASH_FILE_SHA256 = "60baa4cca594d0e4077ab1a149a5bac2f48b64243e7d0973e78cabfa0697f354";
+var PATCHER_JAR_SHA256 = "142e04c95af5d7a70e486ea4ae175a46d4abc3ea7f7ec58d37003069f5ae98b8";
+var PATCHER_SIG_SHA256 = "ce80d54d9ef9afcb451e01469119593b5a87c371270af20501353ad6716c3d07";
+var CLEAN_HASH_FILE_SHA256 = "6150bee4789f9f37ac394f9e00eca37cf6ae1b598b376e95cdf0e560821f021b";
 
 var fso = new ActiveXObject("Scripting.FileSystemObject");
 var shell = new ActiveXObject("WScript.Shell");
@@ -1149,7 +1149,7 @@ function getBackupsSorted() {
   return list;
 }
 
-function waitForPreferredLiveClean(liveJar, timeoutSec) {
+function waitForSupportedLiveClean(liveJar, timeoutSec) {
   timeoutSec = parseInt(timeoutSec, 10);
   if (!(timeoutSec > 0)) {
     timeoutSec = 900;
@@ -1157,7 +1157,7 @@ function waitForPreferredLiveClean(liveJar, timeoutSec) {
   info("\u0436\u0434\u0443 \u043f\u043e\u043a\u0430 steam \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0444\u0430\u0439\u043b\u043e\u0432. \u043c\u0430\u043a\u0441\u0438\u043c\u0443\u043c " + timeoutSec + " \u0441\u0435\u043a");
   for (var elapsed = 0; elapsed < timeoutSec; elapsed += 5) {
     var liveSha = getSha256(liveJar);
-    if (isPreferredHash(liveSha)) {
+    if (isSupportedHash(liveSha)) {
       info("steam \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u043b \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443. \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u043d\u0430\u0448\u0435\u043b");
       return true;
     }
@@ -1173,7 +1173,7 @@ function prepareClean(liveJar, suppliedClean) {
   ensureFolder(BACKUP_DIR);
 
   if (fileExists(CLEAN_JAR)) {
-    if (isPreferredHash(getSha256(CLEAN_JAR))) {
+    if (isSupportedHash(getSha256(CLEAN_JAR))) {
       info("\u0431\u0435\u0440\u0443 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0439 \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442");
       return;
     }
@@ -1183,7 +1183,7 @@ function prepareClean(liveJar, suppliedClean) {
 
   var resolvedClean = resolveGameInput(suppliedClean);
   var resolvedCleanSha = resolvedClean ? getSha256(resolvedClean) : "";
-  if (resolvedClean && isPreferredHash(resolvedCleanSha)) {
+  if (resolvedClean && isSupportedHash(resolvedCleanSha)) {
     info("\u0431\u0435\u0440\u0443 \u0443\u043a\u0430\u0437\u0430\u043d\u043d\u044b\u0439 \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442");
     copyFileOverwrite(resolvedClean, CLEAN_JAR);
     return;
@@ -1193,7 +1193,7 @@ function prepareClean(liveJar, suppliedClean) {
   }
 
   var liveSha = getSha256(liveJar);
-  if (isPreferredHash(liveSha)) {
+  if (isSupportedHash(liveSha)) {
     info("\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u0443\u0436\u0435 \u0447\u0438\u0441\u0442\u044b\u0439. \u0431\u0435\u0440\u0443 \u0435\u0433\u043e");
     copyFileOverwrite(liveJar, CLEAN_JAR);
     return;
@@ -1201,7 +1201,7 @@ function prepareClean(liveJar, suppliedClean) {
 
   var backups = getBackupsSorted();
   for (var i = 0; i < backups.length; i++) {
-    if (isPreferredHash(getSha256(backups[i].path))) {
+    if (isSupportedHash(getSha256(backups[i].path))) {
       info("\u043d\u0430\u0448\u0435\u043b \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u0432 \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u043e\u0439 \u043a\u043e\u043f\u0438\u0438");
       copyFileOverwrite(backups[i].path, CLEAN_JAR);
       return;
@@ -1212,7 +1212,7 @@ function prepareClean(liveJar, suppliedClean) {
   info("\u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e \u043d\u0435 \u043d\u0430\u0448\u0435\u043b. \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u044e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0444\u0430\u0439\u043b\u043e\u0432 \u0432 steam");
   if (requestSteamValidation()) {
     var timeoutSec = getEnv("REPACKGENDER_STEAM_VALIDATE_TIMEOUT") || "900";
-    if (waitForPreferredLiveClean(liveJar, timeoutSec)) {
+    if (waitForSupportedLiveClean(liveJar, timeoutSec)) {
       copyFileOverwrite(liveJar, CLEAN_JAR);
       return;
     }
@@ -1304,12 +1304,12 @@ function restoreClean(argLive) {
   }
   var restoreSource = CLEAN_JAR;
   var cleanSha = getSha256(restoreSource);
-  if (!isPreferredHash(cleanSha)) {
+  if (!isSupportedHash(cleanSha)) {
     var backups = getBackupsSorted();
     restoreSource = "";
     for (var i = 0; i < backups.length; i++) {
       var backupSha = getSha256(backups[i].path);
-      if (isPreferredHash(backupSha)) {
+      if (isSupportedHash(backupSha)) {
         restoreSource = backups[i].path;
         cleanSha = backupSha;
         info("\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0439 clean \u0443\u0441\u0442\u0430\u0440\u0435\u043b. \u0431\u0435\u0440\u0443 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u044b\u0439 clean \u0438\u0437 backup");
