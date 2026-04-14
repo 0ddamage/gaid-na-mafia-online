@@ -425,6 +425,24 @@ function supportedHashList() {
   return SUPPORTED_HASHES.join(", ");
 }
 
+function sameHash(a, b) {
+  return !!a && !!b && lower(a) === lower(b);
+}
+
+function chooseTargetCleanHash(liveSha, suppliedSha) {
+  if (isSupportedHash(liveSha)) {
+    return lower(liveSha);
+  }
+  if (isSupportedHash(suppliedSha)) {
+    return lower(suppliedSha);
+  }
+  return PREFERRED_CLEAN_HASH;
+}
+
+function isTargetCleanHash(hash, targetHash) {
+  return sameHash(hash, targetHash);
+}
+
 function manualInstallCommandHint() {
   return 'install.bat "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Mafia Online" "D:\\path\\to\\MafiaOnline.jar"';
 }
@@ -1149,7 +1167,7 @@ function getBackupsSorted() {
   return list;
 }
 
-function waitForSupportedLiveClean(liveJar, timeoutSec) {
+function waitForTargetLiveClean(liveJar, targetHash, timeoutSec) {
   timeoutSec = parseInt(timeoutSec, 10);
   if (!(timeoutSec > 0)) {
     timeoutSec = 900;
@@ -1157,7 +1175,7 @@ function waitForSupportedLiveClean(liveJar, timeoutSec) {
   info("\u0436\u0434\u0443 \u043f\u043e\u043a\u0430 steam \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0444\u0430\u0439\u043b\u043e\u0432. \u043c\u0430\u043a\u0441\u0438\u043c\u0443\u043c " + timeoutSec + " \u0441\u0435\u043a");
   for (var elapsed = 0; elapsed < timeoutSec; elapsed += 5) {
     var liveSha = getSha256(liveJar);
-    if (isSupportedHash(liveSha)) {
+    if (isTargetCleanHash(liveSha, targetHash)) {
       info("steam \u0437\u0430\u043a\u043e\u043d\u0447\u0438\u043b \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443. \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u043d\u0430\u0448\u0435\u043b");
       return true;
     }
@@ -1172,8 +1190,13 @@ function prepareClean(liveJar, suppliedClean) {
   ensureFolder(parentDir(PATCHED_JAR));
   ensureFolder(BACKUP_DIR);
 
+  var liveSha = getSha256(liveJar);
+  var resolvedClean = resolveGameInput(suppliedClean);
+  var resolvedCleanSha = resolvedClean ? getSha256(resolvedClean) : "";
+  var targetHash = chooseTargetCleanHash(liveSha, resolvedCleanSha);
+
   if (fileExists(CLEAN_JAR)) {
-    if (isSupportedHash(getSha256(CLEAN_JAR))) {
+    if (isTargetCleanHash(getSha256(CLEAN_JAR), targetHash)) {
       info("\u0431\u0435\u0440\u0443 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0439 \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442");
       return;
     }
@@ -1181,9 +1204,7 @@ function prepareClean(liveJar, suppliedClean) {
     deleteFile(CLEAN_JAR);
   }
 
-  var resolvedClean = resolveGameInput(suppliedClean);
-  var resolvedCleanSha = resolvedClean ? getSha256(resolvedClean) : "";
-  if (resolvedClean && isSupportedHash(resolvedCleanSha)) {
+  if (resolvedClean && isTargetCleanHash(resolvedCleanSha, targetHash)) {
     info("\u0431\u0435\u0440\u0443 \u0443\u043a\u0430\u0437\u0430\u043d\u043d\u044b\u0439 \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442");
     copyFileOverwrite(resolvedClean, CLEAN_JAR);
     return;
@@ -1192,8 +1213,7 @@ function prepareClean(liveJar, suppliedClean) {
     info("\u0443 \u0443\u043a\u0430\u0437\u0430\u043d\u043d\u043e\u0433\u043e clean-\u043a\u043b\u0438\u0435\u043d\u0442\u0430 \u043d\u0435 \u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044f. SHA: " + (resolvedCleanSha || "unknown") + ". \u041e\u0436\u0438\u0434\u0430\u044e: " + supportedHashList());
   }
 
-  var liveSha = getSha256(liveJar);
-  if (isSupportedHash(liveSha)) {
+  if (isTargetCleanHash(liveSha, targetHash)) {
     info("\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u0443\u0436\u0435 \u0447\u0438\u0441\u0442\u044b\u0439. \u0431\u0435\u0440\u0443 \u0435\u0433\u043e");
     copyFileOverwrite(liveJar, CLEAN_JAR);
     return;
@@ -1201,7 +1221,7 @@ function prepareClean(liveJar, suppliedClean) {
 
   var backups = getBackupsSorted();
   for (var i = 0; i < backups.length; i++) {
-    if (isSupportedHash(getSha256(backups[i].path))) {
+    if (isTargetCleanHash(getSha256(backups[i].path), targetHash)) {
       info("\u043d\u0430\u0448\u0435\u043b \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u0432 \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u043e\u0439 \u043a\u043e\u043f\u0438\u0438");
       copyFileOverwrite(backups[i].path, CLEAN_JAR);
       return;
@@ -1212,7 +1232,7 @@ function prepareClean(liveJar, suppliedClean) {
   info("\u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e \u043d\u0435 \u043d\u0430\u0448\u0435\u043b. \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u044e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0444\u0430\u0439\u043b\u043e\u0432 \u0432 steam");
   if (requestSteamValidation()) {
     var timeoutSec = getEnv("REPACKGENDER_STEAM_VALIDATE_TIMEOUT") || "900";
-    if (waitForSupportedLiveClean(liveJar, timeoutSec)) {
+    if (waitForTargetLiveClean(liveJar, targetHash, timeoutSec)) {
       copyFileOverwrite(liveJar, CLEAN_JAR);
       return;
     }

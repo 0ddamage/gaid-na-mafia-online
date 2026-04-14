@@ -73,6 +73,26 @@ supported_clean_sha_list() {
   done
   printf '%s\n' "$out"
 }
+same_clean_sha() {
+  local left="${1:-}" right="${2:-}"
+  [[ -n "$left" && -n "$right" && "$left" == "$right" ]]
+}
+choose_target_clean_sha() {
+  local live_sha="${1:-}" supplied_sha="${2:-}"
+  if is_supported_clean_sha "$live_sha"; then
+    printf '%s\n' "$live_sha"
+    return 0
+  fi
+  if is_supported_clean_sha "$supplied_sha"; then
+    printf '%s\n' "$supplied_sha"
+    return 0
+  fi
+  printf '%s\n' "$PREFERRED_CLEAN_SHA"
+}
+is_target_clean_sha() {
+  local hash="${1:-}" target_sha="${2:-}"
+  same_clean_sha "$hash" "$target_sha"
+}
 set_window_title() {
   if [[ -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
     printf '\033]0;%s\007' 'REPACKGENDER :: установка'
@@ -754,9 +774,10 @@ request_steam_validation() {
   fi
   return 1
 }
-wait_for_supported_live_clean() {
+wait_for_target_live_clean() {
   local live_jar="$1"
-  local timeout_sec="${2:-900}"
+  local target_sha="$2"
+  local timeout_sec="${3:-900}"
   local interval=5 elapsed=0 live_sha=''
   if (( timeout_sec <= 0 )); then
     return 1
@@ -764,7 +785,7 @@ wait_for_supported_live_clean() {
   info_msg "Жду завершения проверки Steam (до ${timeout_sec} сек)..."
   while (( elapsed < timeout_sec )); do
     live_sha="$(sha256_of "$live_jar" 2>/dev/null || true)"
-    if is_supported_clean_sha "$live_sha"; then
+    if is_target_clean_sha "$live_sha" "$target_sha"; then
       info_msg 'Steam-проверка завершена: clean-хэш подтверждён.'
       return 0
     fi
@@ -777,36 +798,41 @@ wait_for_supported_live_clean() {
 prepare_clean_jar() {
   local live_jar="$1"
   local supplied_clean="${2:-}"
-  local resolved_clean='' supplied_sha='' live_sha='' backup_clean='' validate_timeout='' expected_shas=''
+  local resolved_clean='' supplied_sha='' live_sha='' backup_clean='' validate_timeout='' expected_shas='' target_sha=''
   load_supported_clean_shas
   mkdir -p "$(dirname "$CLEAN_JAR")" "$(dirname "$PATCHED_JAR")" "$BACKUP_DIR" "$LOG_DIR"
+  live_sha="$(sha256_of "$live_jar")"
+  resolved_clean="$(resolve_game_path_input "$supplied_clean" 2>/dev/null || true)"
+  if [[ -f "$resolved_clean" ]]; then
+    supplied_sha="$(sha256_of "$resolved_clean")"
+  fi
+  target_sha="$(choose_target_clean_sha "$live_sha" "$supplied_sha")"
   if [[ -f "$CLEAN_JAR" ]]; then
-    if is_supported_clean_sha "$(sha256_of "$CLEAN_JAR")"; then
+    if is_target_clean_sha "$(sha256_of "$CLEAN_JAR")" "$target_sha"; then
       return 0
     fi
     info_msg 'Локальная clean-копия устарела или изменена. Пересобираю clean автоматически.'
     rm -f "$CLEAN_JAR"
   fi
-  resolved_clean="$(resolve_game_path_input "$supplied_clean" 2>/dev/null || true)"
   if [[ -f "$resolved_clean" ]]; then
-    supplied_sha="$(sha256_of "$resolved_clean")"
-    if is_supported_clean_sha "$supplied_sha"; then
+    if is_target_clean_sha "$supplied_sha" "$target_sha"; then
       cp -f "$resolved_clean" "$CLEAN_JAR"
       return 0
     fi
     info_msg 'Хэш указанного clean-файла отличается от списка поддерживаемых. Ищу clean автоматически.'
   fi
-  live_sha="$(sha256_of "$live_jar")"
-  if is_supported_clean_sha "$live_sha"; then
+  if is_target_clean_sha "$live_sha" "$target_sha"; then
     cp -f "$live_jar" "$CLEAN_JAR"
     return 0
   fi
-  backup_clean="$(find_supported_clean_backup || true)"
-  if [[ -n "$backup_clean" ]]; then
-    info_msg 'Нашёл clean в локальных backup. Использую его автоматически.'
-    cp -f "$backup_clean" "$CLEAN_JAR"
-    return 0
-  fi
+  while IFS= read -r backup_clean; do
+    [[ -f "$backup_clean" ]] || continue
+    if is_target_clean_sha "$(sha256_of "$backup_clean")" "$target_sha"; then
+      info_msg 'Нашёл clean в локальных backup. Использую его автоматически.'
+      cp -f "$backup_clean" "$CLEAN_JAR"
+      return 0
+    fi
+  done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
     info_msg 'Не удалось подтвердить поддерживаемый clean-хэш локально.'
     info_msg 'Режим совместимости включён: пропускаю ожидание Steam и использую текущий файл игры как clean-базу.'
@@ -822,7 +848,7 @@ prepare_clean_jar() {
     else
       validate_timeout=900
     fi
-    if wait_for_supported_live_clean "$live_jar" "$validate_timeout"; then
+    if wait_for_target_live_clean "$live_jar" "$target_sha" "$validate_timeout"; then
       cp -f "$live_jar" "$CLEAN_JAR"
       return 0
     fi
