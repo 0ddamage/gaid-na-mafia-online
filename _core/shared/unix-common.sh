@@ -709,6 +709,10 @@ list_zip_entries() {
   fi
   return 1
 }
+jar_has_overlay_patch_entries() {
+  local jar_file="$1"
+  list_zip_entries "$jar_file" 2>/dev/null | grep -E -q '^(com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg)$'
+}
 build_macos_overlay_patched_jar() {
   local base_jar="$1"
   local bundled_patched="$2"
@@ -845,6 +849,29 @@ find_supported_clean_backup() {
       printf '%s\n' "$candidate"
       return 0
     fi
+  done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
+  return 1
+}
+find_macos_restore_backup() {
+  local live_sha="$1"
+  local allow_modded="${2:-0}"
+  local bundled_patched='' bundled_sha='' candidate candidate_sha
+  [[ -d "$BACKUP_DIR" ]] || return 1
+  bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
+  if [[ -n "$bundled_patched" && -f "$bundled_patched" ]]; then
+    bundled_sha="$(sha256_of "$bundled_patched" 2>/dev/null || true)"
+  fi
+  while IFS= read -r candidate; do
+    [[ -f "$candidate" ]] || continue
+    candidate_sha="$(sha256_of "$candidate" 2>/dev/null || true)"
+    [[ -n "$candidate_sha" ]] || continue
+    [[ -z "$live_sha" || "$candidate_sha" != "$live_sha" ]] || continue
+    [[ -z "$bundled_sha" || "$candidate_sha" != "$bundled_sha" ]] || continue
+    if [[ "$allow_modded" != "1" ]] && jar_has_overlay_patch_entries "$candidate"; then
+      continue
+    fi
+    printf '%s\n' "$candidate"
+    return 0
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
   return 1
 }
@@ -1032,21 +1059,46 @@ install_patch() {
   fi
 }
 restore_clean() {
-  local live_jar ts backup_target live_sha clean_sha restore_source backup_clean
+  local live_jar ts backup_target live_sha clean_sha restore_source backup_clean restore_kind
   show_banner
   live_jar="$(resolve_live_jar "${1:-}")"
   load_supported_clean_shas
-  [[ -f "$CLEAN_JAR" ]] || die 'Локальная clean-копия не найдена. Восстанавливать нечего.'
-  restore_source="$CLEAN_JAR"
-  clean_sha="$(sha256_of "$restore_source")"
-  if ! is_supported_clean_sha "$clean_sha"; then
+  live_sha="$(sha256_of "$live_jar" 2>/dev/null || true)"
+  restore_kind='clean'
+  if [[ -f "$CLEAN_JAR" ]]; then
+    restore_source="$CLEAN_JAR"
+    clean_sha="$(sha256_of "$restore_source")"
+  else
+    restore_source=''
+    clean_sha=''
+  fi
+  if [[ -z "$restore_source" ]] || ! is_supported_clean_sha "$clean_sha"; then
     backup_clean="$(find_supported_clean_backup || true)"
     if [[ -n "$backup_clean" ]]; then
       restore_source="$backup_clean"
       clean_sha="$(sha256_of "$restore_source")"
-      info_msg 'Локальная clean-копия устарела. Восстанавливаю актуальный clean из backup.'
+      restore_kind='clean'
+      info_msg 'Локальная clean-копия отсутствует или устарела. Восстанавливаю актуальный clean из backup.'
+    elif [[ "$OS_NAME" == "macos" ]]; then
+      backup_clean="$(find_macos_restore_backup "$live_sha" 0 || true)"
+      if [[ -n "$backup_clean" ]]; then
+        restore_source="$backup_clean"
+        clean_sha="$(sha256_of "$restore_source")"
+        restore_kind='macos-backup'
+        info_msg 'macOS: подтверждённый clean не найден. Восстанавливаю последний clean-like backup.'
+      else
+        backup_clean="$(find_macos_restore_backup "$live_sha" 1 || true)"
+        if [[ -n "$backup_clean" ]]; then
+          restore_source="$backup_clean"
+          clean_sha="$(sha256_of "$restore_source")"
+          restore_kind='macos-backup'
+          info_msg 'macOS: clean-like backup не найден. Восстанавливаю последний безопасный backup.'
+        else
+          die "Локальная clean-копия и подходящий macOS backup не найдены. Запусти в Steam «Проверить целостность файлов», затем снова установку мода."
+        fi
+      fi
     else
-      die "Локальная clean-копия устарела. Запусти в Steam «Проверить целостность файлов», затем снова установку мода."
+      die "Локальная clean-копия не найдена или устарела. Запусти в Steam «Проверить целостность файлов», затем снова установку мода."
     fi
   fi
   mkdir -p "$BACKUP_DIR"
@@ -1056,10 +1108,14 @@ restore_clean() {
   cp -f "$restore_source" "$live_jar"
   live_sha="$(sha256_of "$live_jar")"
   msg ''
-  success_msg 'Чистый клиент восстановлен.'
+  if [[ "$restore_kind" == "macos-backup" ]]; then
+    success_msg 'Клиент восстановлен из macOS backup.'
+  else
+    success_msg 'Чистый клиент восстановлен.'
+  fi
   info_msg "Файл игры: $live_jar"
   info_msg "Резервная копия: $backup_target"
-  info_msg "SHA clean: $clean_sha"
+  info_msg "SHA restore: $clean_sha"
   info_msg "SHA live:  $live_sha"
 }
 case "$MODE" in
