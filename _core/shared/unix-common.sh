@@ -31,6 +31,7 @@ fi
 CLEAN_JAR="$STATE_DIR/clean/client-clean.jar"
 PATCHED_JAR="$STATE_DIR/build/client-patched.jar"
 DIRECT_PATCHED_JAR=""
+MACOS_OVERLAY_BASE_JAR=""
 BACKUP_DIR="$STATE_DIR/backups"
 LOG_DIR="$STATE_DIR/logs"
 JAVA_RUNTIME_DIR="$STATE_DIR/runtime/java"
@@ -598,13 +599,38 @@ resolve_bundled_patched_jar() {
   [[ -n "$candidate" && -f "$candidate" ]] || return 1
   printf '%s\n' "$candidate"
 }
+find_macos_overlay_backup_base() {
+  local bundled_sha="$1"
+  local candidate candidate_sha
+  [[ -d "$BACKUP_DIR" ]] || return 1
+  while IFS= read -r candidate; do
+    [[ -f "$candidate" ]] || continue
+    candidate_sha="$(sha256_of "$candidate" 2>/dev/null || true)"
+    [[ -n "$candidate_sha" && "$candidate_sha" != "$bundled_sha" ]] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
+  return 1
+}
 use_bundled_patched_jar_for_install() {
+  local live_jar="$1"
+  local live_sha="$2"
   local bundled_patched=''
+  local bundled_sha=''
+  local base_jar=''
   bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
   [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
+  bundled_sha="$(sha256_of "$bundled_patched")"
+  base_jar="$live_jar"
+  if [[ "$live_sha" == "$bundled_sha" ]]; then
+    base_jar="$(find_macos_overlay_backup_base "$bundled_sha" || true)"
+    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл похож на несовместимый bundled jar, а подходящий backup не найден. Нужен оригинальный macOS MafiaOnline.jar или ручная Steam-проверка файлов.'
+    info_msg 'macOS: текущий live похож на прошлую неудачную установку; беру последний backup как macOS base.'
+  fi
   DIRECT_PATCHED_JAR="$bundled_patched"
+  MACOS_OVERLAY_BASE_JAR="$base_jar"
   info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
-  info_msg 'macOS: Steam-проверку не запускаю; использую готовый patched jar из release-бандла.'
+  info_msg 'macOS: Steam-проверку не запускаю; сохраняю macOS native-содержимое и накладываю release-патч.'
   return 0
 }
 steam_is_running() {
@@ -672,6 +698,52 @@ sha256_of() {
     return 0
   fi
   die 'Не найден инструмент для SHA-256 (sha256sum или shasum).'
+}
+list_zip_entries() {
+  local jar_file="$1"
+  if command -v unzip >/dev/null 2>&1 && unzip -Z1 "$jar_file"; then
+    return 0
+  fi
+  if command -v zipinfo >/dev/null 2>&1 && zipinfo -1 "$jar_file"; then
+    return 0
+  fi
+  return 1
+}
+build_macos_overlay_patched_jar() {
+  local base_jar="$1"
+  local bundled_patched="$2"
+  local out_jar="$3"
+  local tmp_dir extract_dir entries_file entry_count entry
+  local overlay_regex='^(com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/(au|bf|bo|cw|cz|da|dc|dv|dz|ef|ej|el|er|fh|fp|fw|fy|gi|gj|ie|im|in|ir|kx|ky|le|lf|lj|ll|lv|mq|qz|tf|ti|to|uj)\.class|com/kartuzov/mafiaonline/mq\$j\.class|com/kartuzov/mafiaonline/b/(j|l|n|r)\.class|com/kartuzov/mafiaonline/e/(h|j)\.class|com/kartuzov/mafiaonline/desktop/(DesktopLauncher|a)\.class|com/kartuzov/mafiaonline/u/b\.class|com/kartuzov/mafiaonline/v/b/m\.class|com/kartuzov/mafiaonline/v/bt\.class)$'
+  command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS overlay-установки.'
+  command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS overlay-установки.'
+  [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
+  [[ -f "$bundled_patched" ]] || die "Bundled patched jar не найден: $bundled_patched"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/repackgender-macos-overlay.XXXXXX")"
+  extract_dir="$tmp_dir/extract"
+  entries_file="$tmp_dir/entries.txt"
+  mkdir -p "$extract_dir" "$(dirname "$out_jar")"
+  if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: не удалось найти entries патча в release jar.'
+  fi
+  entry_count="$(wc -l <"$entries_file" | tr -d '[:space:]')"
+  if (( entry_count < 20 )); then
+    rm -rf "$tmp_dir"
+    die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
+  fi
+  cp -f "$base_jar" "$out_jar"
+  zip -q -d "$out_jar" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' >/dev/null 2>&1 || true
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -n "$entry" ]] || continue
+    case "$entry" in
+      /*|*'..'*) rm -rf "$tmp_dir"; die "macOS overlay: небезопасный entry: $entry" ;;
+    esac
+    unzip -qq "$bundled_patched" "$entry" -d "$extract_dir"
+  done <"$entries_file"
+  (cd "$extract_dir" && zip -q -r "$out_jar" .)
+  unzip -tqq "$out_jar" >/dev/null
+  rm -rf "$tmp_dir"
 }
 parse_libraryfolders() {
   local file="$1"
@@ -855,7 +927,7 @@ prepare_clean_jar() {
       return 0
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
-  if [[ "$OS_NAME" == "macos" ]] && use_bundled_patched_jar_for_install; then
+  if [[ "$OS_NAME" == "macos" ]] && use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
     return 0
   fi
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
@@ -915,6 +987,7 @@ cleanup_install_logs() {
 install_patch() {
   local live_jar clean_arg ts backup_target patched_sha live_sha log_file steam_was_running
   DIRECT_PATCHED_JAR=""
+  MACOS_OVERLAY_BASE_JAR=""
   show_banner
   require_java
   live_jar="$(resolve_live_jar "${1:-}")"
@@ -932,7 +1005,9 @@ install_patch() {
   ts="$(date +%Y%m%d-%H%M%S)"
   log_file="$LOG_DIR/install-$ts.log"
   step_msg '3/5' 'Сборка patched jar...'
-  if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
+  if [[ -n "$DIRECT_PATCHED_JAR" && -n "$MACOS_OVERLAY_BASE_JAR" ]]; then
+    build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+  elif [[ -n "$DIRECT_PATCHED_JAR" ]]; then
     cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
   else
     run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
