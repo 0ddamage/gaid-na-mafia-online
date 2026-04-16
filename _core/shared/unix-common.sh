@@ -30,6 +30,7 @@ else
 fi
 CLEAN_JAR="$STATE_DIR/clean/client-clean.jar"
 PATCHED_JAR="$STATE_DIR/build/client-patched.jar"
+DIRECT_PATCHED_JAR=""
 BACKUP_DIR="$STATE_DIR/backups"
 LOG_DIR="$STATE_DIR/logs"
 JAVA_RUNTIME_DIR="$STATE_DIR/runtime/java"
@@ -584,6 +585,27 @@ verify_patcher_release() {
   [[ -f "$PATCHER_SIG" ]] || die "Не найден файл подписи patcher jar: $PATCHER_SIG"
   verify_release_certificate
   verify_signed_file "$PATCHER_JAR" "$PATCHER_SIG" 'patcher jar'
+  verify_release_manifest
+}
+resolve_bundled_patched_jar() {
+  local line relative_path candidate=''
+  [[ -f "$RELEASE_MANIFEST" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[0-9a-f]{64}\ \ (_core/bin/repackgender-core-v[^[:space:]]*-patched\.jar)$ ]] || continue
+    relative_path="${BASH_REMATCH[1]}"
+    candidate="$ROOT_DIR/$relative_path"
+  done <"$RELEASE_MANIFEST"
+  [[ -n "$candidate" && -f "$candidate" ]] || return 1
+  printf '%s\n' "$candidate"
+}
+use_bundled_patched_jar_for_install() {
+  local bundled_patched=''
+  bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
+  [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
+  DIRECT_PATCHED_JAR="$bundled_patched"
+  info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
+  info_msg 'macOS: Steam-проверку не запускаю; использую готовый patched jar из release-бандла.'
+  return 0
 }
 steam_is_running() {
   if [[ "$OS_NAME" == "macos" ]]; then
@@ -833,6 +855,9 @@ prepare_clean_jar() {
       return 0
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
+  if [[ "$OS_NAME" == "macos" ]] && use_bundled_patched_jar_for_install; then
+    return 0
+  fi
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
     info_msg 'Не удалось подтвердить поддерживаемый clean-хэш локально.'
     info_msg 'Режим совместимости включён: пропускаю ожидание Steam и использую текущий файл игры как clean-базу.'
@@ -889,6 +914,7 @@ cleanup_install_logs() {
 }
 install_patch() {
   local live_jar clean_arg ts backup_target patched_sha live_sha log_file steam_was_running
+  DIRECT_PATCHED_JAR=""
   show_banner
   require_java
   live_jar="$(resolve_live_jar "${1:-}")"
@@ -906,7 +932,11 @@ install_patch() {
   ts="$(date +%Y%m%d-%H%M%S)"
   log_file="$LOG_DIR/install-$ts.log"
   step_msg '3/5' 'Сборка patched jar...'
-  run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
+  if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
+    cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+  else
+    run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
+  fi
   step_msg '4/5' 'Создание резервной копии live-файла...'
   backup_target="$BACKUP_DIR/live-before-install-$ts.jar"
   cp -f "$live_jar" "$backup_target"
