@@ -881,6 +881,8 @@ find_supported_clean_backup() {
 prepare_macos_compat_clean_jar() {
   local live_jar="$1"
   local live_sha="$2"
+  local supplied_clean="${3:-}"
+  local supplied_sha="${4:-}"
   local bundled_patched='' bundled_sha='' base_jar=''
   [[ "$OS_NAME" == "macos" ]] || return 1
   PATCHER_ALLOW_UNSUPPORTED_CLEAN=0
@@ -888,17 +890,25 @@ prepare_macos_compat_clean_jar() {
   if [[ -n "$bundled_patched" && -f "$bundled_patched" ]]; then
     bundled_sha="$(sha256_of "$bundled_patched" 2>/dev/null || true)"
   fi
-  base_jar="$live_jar"
-  if [[ -n "$bundled_sha" && "$live_sha" == "$bundled_sha" ]] || jar_has_overlay_patch_entries "$live_jar"; then
-    base_jar="$(find_macos_restore_backup "$live_sha" 0 || true)"
-    [[ -n "$base_jar" && -f "$base_jar" ]] || return 1
-    info_msg 'macOS: текущий live похож на прошлую неудачную или уже модифицированную установку; беру последний clean-like backup как базу.'
+  if [[ -n "$supplied_clean" && -f "$supplied_clean" ]]; then
+    base_jar="$supplied_clean"
+    info_msg 'macOS: указанный clean не входит в список Windows/Proton SHA.'
+    info_msg 'macOS: беру указанный clean как базу и запускаю patcher в режиме совместимости.'
   else
-    info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
-    info_msg 'macOS: использую текущий macOS jar как clean-базу и запускаю patcher в режиме совместимости.'
+    base_jar="$live_jar"
+    if [[ -n "$bundled_sha" && "$live_sha" == "$bundled_sha" ]] || jar_has_overlay_patch_entries "$live_jar"; then
+      base_jar="$(find_macos_restore_backup "$live_sha" 0 || true)"
+      [[ -n "$base_jar" && -f "$base_jar" ]] || return 1
+      info_msg 'macOS: текущий live похож на прошлую неудачную или уже модифицированную установку; беру последний clean-like backup как базу.'
+    else
+      info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
+      info_msg 'macOS: использую текущий macOS jar как clean-базу и запускаю patcher в режиме совместимости.'
+    fi
   fi
   cp -f "$base_jar" "$CLEAN_JAR"
   PATCHER_ALLOW_UNSUPPORTED_CLEAN=1
+  DIRECT_PATCHED_JAR=""
+  MACOS_OVERLAY_BASE_JAR=""
   return 0
 }
 find_macos_restore_backup() {
@@ -1005,12 +1015,12 @@ prepare_clean_jar() {
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
   if [[ "$OS_NAME" == "macos" ]]; then
+    if prepare_macos_compat_clean_jar "$live_jar" "$live_sha" "$resolved_clean" "$supplied_sha"; then
+      return 0
+    fi
     if use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
       return 0
     fi
-  fi
-  if prepare_macos_compat_clean_jar "$live_jar" "$live_sha"; then
-    return 0
   fi
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
     info_msg 'Не удалось подтвердить поддерживаемый clean-хэш локально.'
