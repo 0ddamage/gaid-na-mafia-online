@@ -722,7 +722,7 @@ build_macos_overlay_patched_jar() {
   local bundled_patched="$2"
   local out_jar="$3"
   local tmp_dir extract_dir entries_file entry_count entry
-  local overlay_regex='^(com/kartuzov/mafiaonline/.*)$'
+  local overlay_regex='^(com/kartuzov/mafiaonline/.*|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window(\$.*)?\.class|ui/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$'
   command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS overlay-установки.'
   command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS overlay-установки.'
   [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
@@ -750,6 +750,16 @@ build_macos_overlay_patched_jar() {
      ! grep -Fxq 'com/kartuzov/mafiaonline/io.class' "$entries_file"; then
     rm -rf "$tmp_dir"
     die 'macOS overlay: in.class выбран без io.class. Установка остановлена (битая смесь классов).'
+  fi
+  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
+     ! grep -Fxq 'comicbd.ttf' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: DesktopLauncher выбран без comicbd.ttf. Установка остановлена (битый набор ресурсов).'
+  fi
+  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
+     ! grep -Fxq 'com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: DesktopLauncher выбран без patched Lwjgl3Window.class. Установка остановлена (битый overlay lifecycle-path).'
   fi
   cp -f "$base_jar" "$out_jar"
   chmod u+w "$out_jar" >/dev/null 2>&1 || true
