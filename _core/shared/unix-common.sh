@@ -32,6 +32,7 @@ CLEAN_JAR="$STATE_DIR/clean/client-clean.jar"
 PATCHED_JAR="$STATE_DIR/build/client-patched.jar"
 DIRECT_PATCHED_JAR=""
 MACOS_OVERLAY_BASE_JAR=""
+PATCHER_ALLOW_UNSUPPORTED_CLEAN=0
 BACKUP_DIR="$STATE_DIR/backups"
 LOG_DIR="$STATE_DIR/logs"
 JAVA_RUNTIME_DIR="$STATE_DIR/runtime/java"
@@ -635,7 +636,10 @@ use_bundled_patched_jar_for_install() {
 }
 steam_is_running() {
   if [[ "$OS_NAME" == "macos" ]]; then
-    pgrep -f '/Steam.app/' >/dev/null 2>&1
+    pgrep -x Steam >/dev/null 2>&1 \
+      || pgrep -f '/Steam.app/' >/dev/null 2>&1 \
+      || pgrep -f 'steam_osx' >/dev/null 2>&1 \
+      || pgrep -f steamwebhelper >/dev/null 2>&1
     return
   fi
   pgrep -x steam >/dev/null 2>&1 || pgrep -f steamwebhelper >/dev/null 2>&1
@@ -711,7 +715,7 @@ list_zip_entries() {
 }
 jar_has_overlay_patch_entries() {
   local jar_file="$1"
-  list_zip_entries "$jar_file" 2>/dev/null | grep -E -q '^(com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg)$'
+  list_zip_entries "$jar_file" 2>/dev/null | grep -E -q '^(com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/r1\.dat|com/kartuzov/mafiaonline/r2\.bin)$'
 }
 build_macos_overlay_patched_jar() {
   local base_jar="$1"
@@ -852,6 +856,29 @@ find_supported_clean_backup() {
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
   return 1
 }
+prepare_macos_compat_clean_jar() {
+  local live_jar="$1"
+  local live_sha="$2"
+  local bundled_patched='' bundled_sha='' base_jar=''
+  [[ "$OS_NAME" == "macos" ]] || return 1
+  PATCHER_ALLOW_UNSUPPORTED_CLEAN=0
+  bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
+  if [[ -n "$bundled_patched" && -f "$bundled_patched" ]]; then
+    bundled_sha="$(sha256_of "$bundled_patched" 2>/dev/null || true)"
+  fi
+  base_jar="$live_jar"
+  if [[ -n "$bundled_sha" && "$live_sha" == "$bundled_sha" ]] || jar_has_overlay_patch_entries "$live_jar"; then
+    base_jar="$(find_macos_restore_backup "$live_sha" 0 || true)"
+    [[ -n "$base_jar" && -f "$base_jar" ]] || return 1
+    info_msg 'macOS: текущий live похож на прошлую неудачную или уже модифицированную установку; беру последний clean-like backup как базу.'
+  else
+    info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
+    info_msg 'macOS: использую текущий macOS jar как clean-базу и запускаю patcher в режиме совместимости.'
+  fi
+  cp -f "$base_jar" "$CLEAN_JAR"
+  PATCHER_ALLOW_UNSUPPORTED_CLEAN=1
+  return 0
+}
 find_macos_restore_backup() {
   local live_sha="$1"
   local allow_modded="${2:-0}"
@@ -920,6 +947,7 @@ prepare_clean_jar() {
   local live_jar="$1"
   local supplied_clean="${2:-}"
   local resolved_clean='' supplied_sha='' live_sha='' backup_clean='' validate_timeout='' expected_shas='' target_sha=''
+  PATCHER_ALLOW_UNSUPPORTED_CLEAN=0
   load_supported_clean_shas
   mkdir -p "$(dirname "$CLEAN_JAR")" "$(dirname "$PATCHED_JAR")" "$BACKUP_DIR" "$LOG_DIR"
   live_sha="$(sha256_of "$live_jar")"
@@ -954,13 +982,14 @@ prepare_clean_jar() {
       return 0
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
-  if [[ "$OS_NAME" == "macos" ]] && use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
+  if prepare_macos_compat_clean_jar "$live_jar" "$live_sha"; then
     return 0
   fi
   if [[ -n "${REPACKGENDER_ALLOW_UNSUPPORTED_CLEAN:-}" ]]; then
     info_msg 'Не удалось подтвердить поддерживаемый clean-хэш локально.'
     info_msg 'Режим совместимости включён: пропускаю ожидание Steam и использую текущий файл игры как clean-базу.'
     cp -f "$live_jar" "$CLEAN_JAR"
+    PATCHER_ALLOW_UNSUPPORTED_CLEAN=1
     return 0
   fi
   info_msg 'Не нашёл clean локально. Пробую запустить проверку файлов в Steam автоматически.'
@@ -989,7 +1018,11 @@ run_patcher() {
   local tmp_log="${log_file}.tmp"
   rm -f "$tmp_log" "$log_file"
   set +e
-  "$JAVA_BIN" -jar "$PATCHER_JAR" "$clean_jar" "$out_jar" >"$tmp_log" 2>&1
+  if [[ "$PATCHER_ALLOW_UNSUPPORTED_CLEAN" == "1" ]]; then
+    REPACKGENDER_PATCHER_ALLOW_UNSUPPORTED_CLEAN=1 "$JAVA_BIN" -jar "$PATCHER_JAR" "$clean_jar" "$out_jar" >"$tmp_log" 2>&1
+  else
+    "$JAVA_BIN" -jar "$PATCHER_JAR" "$clean_jar" "$out_jar" >"$tmp_log" 2>&1
+  fi
   rc=$?
   set -e
   if [[ "$rc" -ne 0 ]]; then
@@ -1015,6 +1048,7 @@ install_patch() {
   local live_jar clean_arg ts backup_target patched_sha live_sha log_file steam_was_running
   DIRECT_PATCHED_JAR=""
   MACOS_OVERLAY_BASE_JAR=""
+  PATCHER_ALLOW_UNSUPPORTED_CLEAN=0
   show_banner
   require_java
   live_jar="$(resolve_live_jar "${1:-}")"
@@ -1032,13 +1066,7 @@ install_patch() {
   ts="$(date +%Y%m%d-%H%M%S)"
   log_file="$LOG_DIR/install-$ts.log"
   step_msg '3/5' 'Сборка patched jar...'
-  if [[ -n "$DIRECT_PATCHED_JAR" && -n "$MACOS_OVERLAY_BASE_JAR" ]]; then
-    build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
-  elif [[ -n "$DIRECT_PATCHED_JAR" ]]; then
-    cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
-  else
-    run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
-  fi
+  run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
   step_msg '4/5' 'Создание резервной копии live-файла...'
   backup_target="$BACKUP_DIR/live-before-install-$ts.jar"
   cp -f "$live_jar" "$backup_target"
