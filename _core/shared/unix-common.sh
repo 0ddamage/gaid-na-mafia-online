@@ -741,6 +741,7 @@ build_macos_overlay_patched_jar() {
     die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
   fi
   cp -f "$base_jar" "$out_jar"
+  chmod u+w "$out_jar" >/dev/null 2>&1 || true
   zip -q -d "$out_jar" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' >/dev/null 2>&1 || true
   while IFS= read -r entry || [[ -n "$entry" ]]; do
     [[ -n "$entry" ]] || continue
@@ -982,6 +983,11 @@ prepare_clean_jar() {
       return 0
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
+  if [[ "$OS_NAME" == "macos" ]]; then
+    if use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
+      return 0
+    fi
+  fi
   if prepare_macos_compat_clean_jar "$live_jar" "$live_sha"; then
     return 0
   fi
@@ -1066,7 +1072,16 @@ install_patch() {
   ts="$(date +%Y%m%d-%H%M%S)"
   log_file="$LOG_DIR/install-$ts.log"
   step_msg '3/5' 'Сборка patched jar...'
-  run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
+  if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
+    if [[ "$OS_NAME" == "macos" ]]; then
+      info_msg 'macOS: собираю patched jar через overlay (release-payload + macOS base).'
+      build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+    else
+      cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+    fi
+  else
+    run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
+  fi
   step_msg '4/5' 'Создание резервной копии live-файла...'
   backup_target="$BACKUP_DIR/live-before-install-$ts.jar"
   cp -f "$live_jar" "$backup_target"
