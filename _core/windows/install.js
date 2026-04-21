@@ -106,6 +106,32 @@ function deleteFolder(path) {
   } catch (e) {}
 }
 
+function cleanupGameDebugLogs(liveJar) {
+  var gameDir = parentDir(liveJar);
+  var logs = [
+    joinPath(gameDir, "match-night-live.log"),
+    joinPath(gameDir, "mn.log")
+  ];
+  var removed = false;
+  for (var i = 0; i < logs.length; i++) {
+    if (!fileExists(logs[i])) {
+      continue;
+    }
+    try {
+      fso.DeleteFile(logs[i], true);
+      removed = true;
+    } catch (e1) {
+      try {
+        writeTextFile(logs[i], "");
+        removed = true;
+      } catch (e2) {}
+    }
+  }
+  if (removed) {
+    info("\u0443\u0434\u0430\u043b\u0438\u043b \u0441\u0442\u0430\u0440\u044b\u0435 debug-\u043b\u043e\u0433\u0438 match-night \u0438\u0437 \u043f\u0430\u043f\u043a\u0438 \u0438\u0433\u0440\u044b");
+  }
+}
+
 function quote(arg) {
   return '"' + String(arg) + '"';
 }
@@ -1305,6 +1331,7 @@ function installPatch(argLive, argClean) {
 
   step("7/7", "\u043f\u043e\u0434\u043c\u0435\u043d\u044f\u044e \u043a\u043b\u0438\u0435\u043d\u0442");
   copyWithRetries(PATCHED_JAR, liveJar, "replace the game file");
+  cleanupGameDebugLogs(liveJar);
   deleteFile(PATCHED_JAR);
 
   out("");
@@ -1349,6 +1376,7 @@ function restoreClean(argLive) {
 
   step("3/3", "\u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u044e \u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442");
   copyWithRetries(restoreSource, liveJar, "restore the clean jar");
+  cleanupGameDebugLogs(liveJar);
 
   out("");
   ok("\u0447\u0438\u0441\u0442\u044b\u0439 \u043a\u043b\u0438\u0435\u043d\u0442 \u0432\u0435\u0440\u043d\u0443\u043b");

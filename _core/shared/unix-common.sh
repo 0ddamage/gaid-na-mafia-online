@@ -1071,6 +1071,23 @@ cleanup_install_logs() {
   find "$LOG_DIR" -maxdepth 1 -type f -name 'install-*.log' -delete 2>/dev/null || true
   find "$LOG_DIR" -maxdepth 1 -type f -name 'install-*.log.tmp' -delete 2>/dev/null || true
 }
+cleanup_game_debug_logs() {
+  local live_jar="$1"
+  local game_dir log_path removed
+  game_dir="$(dirname "$live_jar")"
+  removed=0
+  for log_path in "$game_dir/match-night-live.log" "$game_dir/mn.log"; do
+    if [[ -e "$log_path" ]]; then
+      rm -f "$log_path" 2>/dev/null || : >"$log_path" 2>/dev/null || true
+      if [[ ! -e "$log_path" || ! -s "$log_path" ]]; then
+        removed=1
+      fi
+    fi
+  done
+  if [[ "$removed" -eq 1 ]]; then
+    info_msg 'Удалил старые debug-логи match-night из папки игры.'
+  fi
+}
 install_patch() {
   local live_jar clean_arg ts backup_target patched_sha live_sha log_file steam_was_running
   DIRECT_PATCHED_JAR=""
@@ -1108,6 +1125,7 @@ install_patch() {
   cp -f "$live_jar" "$backup_target"
   step_msg '5/5' 'Замена клиента...'
   cp -f "$PATCHED_JAR" "$live_jar"
+  cleanup_game_debug_logs "$live_jar"
   patched_sha="$(sha256_of "$PATCHED_JAR")"
   live_sha="$(sha256_of "$live_jar")"
   rm -f "$PATCHED_JAR"
@@ -1170,6 +1188,7 @@ restore_clean() {
   backup_target="$BACKUP_DIR/live-before-restore-$ts.jar"
   cp -f "$live_jar" "$backup_target"
   cp -f "$restore_source" "$live_jar"
+  cleanup_game_debug_logs "$live_jar"
   live_sha="$(sha256_of "$live_jar")"
   msg ''
   if [[ "$restore_kind" == "macos-backup" ]]; then
