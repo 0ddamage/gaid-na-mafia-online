@@ -600,6 +600,9 @@ resolve_bundled_patched_jar() {
   [[ -n "$candidate" && -f "$candidate" ]] || return 1
   printf '%s\n' "$candidate"
 }
+jar_has_macos_native_libs() {
+  list_zip_entries "$1" 2>/dev/null | grep -Fxq "libgdx64.dylib"
+}
 find_macos_overlay_backup_base() {
   local bundled_sha="$1"
   local candidate candidate_sha
@@ -608,6 +611,7 @@ find_macos_overlay_backup_base() {
     [[ -f "$candidate" ]] || continue
     candidate_sha="$(sha256_of "$candidate" 2>/dev/null || true)"
     [[ -n "$candidate_sha" && "$candidate_sha" != "$bundled_sha" ]] || continue
+    jar_has_macos_native_libs "$candidate" || continue
     printf '%s\n' "$candidate"
     return 0
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
@@ -623,10 +627,10 @@ use_bundled_patched_jar_for_install() {
   [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
   bundled_sha="$(sha256_of "$bundled_patched")"
   base_jar="$live_jar"
-  if [[ "$live_sha" == "$bundled_sha" ]]; then
+  if [[ "$live_sha" == "$bundled_sha" ]] || ! jar_has_macos_native_libs "$live_jar"; then
     base_jar="$(find_macos_overlay_backup_base "$bundled_sha" || true)"
-    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл похож на несовместимый bundled jar, а подходящий backup не найден. Нужен оригинальный macOS MafiaOnline.jar или ручная Steam-проверка файлов.'
-    info_msg 'macOS: текущий live похож на прошлую неудачную установку; беру последний backup как macOS base.'
+    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: в текущем jar нет Mac native-libs (libgdx64.dylib), а подходящий backup не найден. Запусти Steam «Проверить целостность файлов» и повтори установку.'
+    info_msg 'macOS: в live нет Mac native-libs; беру последний clean-like backup как источник.'
   fi
   DIRECT_PATCHED_JAR="$bundled_patched"
   MACOS_OVERLAY_BASE_JAR="$base_jar"
@@ -716,6 +720,34 @@ list_zip_entries() {
 jar_has_overlay_patch_entries() {
   local jar_file="$1"
   list_zip_entries "$jar_file" 2>/dev/null | grep -E -q '^(com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/r1\.dat|com/kartuzov/mafiaonline/r2\.bin)$'
+}
+build_macos_native_injected_jar() {
+  local mac_base_jar="$1"
+  local bundled_patched="$2"
+  local out_jar="$3"
+  local tmp_dir extract_dir entry native_count
+  command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS установки.'
+  command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS установки.'
+  [[ -f "$mac_base_jar" ]] || die "macOS base jar не найден: $mac_base_jar"
+  [[ -f "$bundled_patched" ]] || die "Bundled patched jar не найден: $bundled_patched"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/repackgender-macos-inject.XXXXXX")"
+  extract_dir="$tmp_dir/extract"
+  mkdir -p "$extract_dir" "$(dirname "$out_jar")"
+  cp -f "$bundled_patched" "$out_jar"
+  chmod u+w "$out_jar" >/dev/null 2>&1 || true
+  zip -q -d "$out_jar" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' >/dev/null 2>&1 || true
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -n "$entry" ]] || continue
+    case "$entry" in
+      /*|*'..'*) rm -rf "$tmp_dir"; die "macOS native inject: небезопасный entry: $entry" ;;
+    esac
+    unzip -qq "$mac_base_jar" "$entry" -d "$extract_dir" 2>/dev/null || true
+  done < <(list_zip_entries "$mac_base_jar" 2>/dev/null | grep -E '^[^/]+\.(dylib|jnilib)$')
+  native_count="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.jnilib' \) 2>/dev/null | wc -l | tr -d '[:space:]')"
+  (( native_count >= 3 )) || { rm -rf "$tmp_dir"; die "macOS native inject: в base jar нашёл только $native_count native-lib, ожидал минимум 3."; }
+  (cd "$extract_dir" && zip -q -r "$out_jar" .)
+  unzip -tqq "$out_jar" >/dev/null
+  rm -rf "$tmp_dir"
 }
 build_macos_overlay_patched_jar() {
   local base_jar="$1"
@@ -1122,9 +1154,11 @@ install_patch() {
   step_msg '3/5' 'Сборка patched jar...'
   if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
     if [[ "$OS_NAME" == "macos" ]]; then
-      info_msg 'macOS: использую release-payload напрямую (без overlay).'
+      info_msg 'macOS: release-payload + Mac native-libs из текущего jar.'
+      build_macos_native_injected_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+    else
+      cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
     fi
-    cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
   else
     run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
   fi
