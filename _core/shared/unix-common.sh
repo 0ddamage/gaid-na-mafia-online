@@ -797,7 +797,7 @@ build_macos_overlay_patched_jar() {
   local bundled_patched="$2"
   local out_jar="$3"
   local tmp_dir extract_dir entries_file entry_count entry
-  local overlay_regex='^(com/kartuzov/mafiaonline/.*|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$'
+  local overlay_regex='^(com/kartuzov/mafiaonline/.*|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|Audio/.*|data/.*|Localization/.*|particle/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx|ogg|wav|mp3|csv|properties))$'
   command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS overlay-установки.'
   command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS overlay-установки.'
   [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
@@ -1197,8 +1197,8 @@ install_patch() {
   step_msg '3/5' 'Сборка patched jar...'
   if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
     if [[ "$OS_NAME" == "macos" ]]; then
-      info_msg 'macOS: add-only overlay (Mac jar + новые entries из release-payload, без замены).'
-      build_macos_addonly_overlay "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+      info_msg 'macOS: собираю patched jar через overlay (release-payload + macOS base).'
+      build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
     else
       cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
     fi
