@@ -1122,11 +1122,9 @@ install_patch() {
   step_msg '3/5' 'Сборка patched jar...'
   if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
     if [[ "$OS_NAME" == "macos" ]]; then
-      info_msg 'macOS: собираю patched jar через overlay (release-payload + macOS base).'
-      build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
-    else
-      cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+      info_msg 'macOS: использую release-payload напрямую (без overlay).'
     fi
+    cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
   else
     run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
   fi
