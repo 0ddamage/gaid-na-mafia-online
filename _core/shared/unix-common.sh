@@ -771,6 +771,16 @@ build_macos_overlay_patched_jar() {
     esac
     unzip -qq "$bundled_patched" "$entry" -d "$extract_dir"
   done <"$entries_file"
+  # Mac-specific missing assets that the overlay regex doesn't cover but
+  # the patched game code expects to load from internal classpath.
+  local mac_missing_assets=(
+    "Audio/TownMusic.ogg"
+  )
+  for missing_entry in "${mac_missing_assets[@]}"; do
+    if list_zip_entries "$bundled_patched" 2>/dev/null | grep -Fxq "$missing_entry"; then
+      unzip -qq "$bundled_patched" "$missing_entry" -d "$extract_dir" 2>/dev/null || true
+    fi
+  done
   (cd "$extract_dir" && zip -q -r "$out_jar" .)
   unzip -tqq "$out_jar" >/dev/null
   rm -rf "$tmp_dir"
