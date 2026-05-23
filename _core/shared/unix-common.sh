@@ -600,9 +600,6 @@ resolve_bundled_patched_jar() {
   [[ -n "$candidate" && -f "$candidate" ]] || return 1
   printf '%s\n' "$candidate"
 }
-jar_has_macos_native_libs() {
-  list_zip_entries "$1" 2>/dev/null | grep -Fxq "libgdx64.dylib"
-}
 find_macos_overlay_backup_base() {
   local bundled_sha="$1"
   local candidate candidate_sha
@@ -611,7 +608,6 @@ find_macos_overlay_backup_base() {
     [[ -f "$candidate" ]] || continue
     candidate_sha="$(sha256_of "$candidate" 2>/dev/null || true)"
     [[ -n "$candidate_sha" && "$candidate_sha" != "$bundled_sha" ]] || continue
-    jar_has_macos_native_libs "$candidate" || continue
     printf '%s\n' "$candidate"
     return 0
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
@@ -627,10 +623,10 @@ use_bundled_patched_jar_for_install() {
   [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
   bundled_sha="$(sha256_of "$bundled_patched")"
   base_jar="$live_jar"
-  if [[ "$live_sha" == "$bundled_sha" ]] || ! jar_has_macos_native_libs "$live_jar"; then
+  if [[ "$live_sha" == "$bundled_sha" ]]; then
     base_jar="$(find_macos_overlay_backup_base "$bundled_sha" || true)"
-    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: в текущем jar нет Mac native-libs (libgdx64.dylib), а подходящий backup не найден. Запусти Steam «Проверить целостность файлов» и повтори установку.'
-    info_msg 'macOS: в live нет Mac native-libs; беру последний clean-like backup как источник.'
+    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл совпадает с release-payload, а подходящий backup не найден. Запусти Steam «Проверить целостность файлов» и повтори установку.'
+    info_msg 'macOS: live совпадает с release-payload; беру последний backup как macOS base.'
   fi
   DIRECT_PATCHED_JAR="$bundled_patched"
   MACOS_OVERLAY_BASE_JAR="$base_jar"
@@ -742,10 +738,15 @@ build_macos_native_injected_jar() {
       /*|*'..'*) rm -rf "$tmp_dir"; die "macOS native inject: небезопасный entry: $entry" ;;
     esac
     unzip -qq "$mac_base_jar" "$entry" -d "$extract_dir" 2>/dev/null || true
-  done < <(list_zip_entries "$mac_base_jar" 2>/dev/null | grep -E '^[^/]+\.(dylib|jnilib)$')
-  native_count="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.jnilib' \) 2>/dev/null | wc -l | tr -d '[:space:]')"
-  (( native_count >= 3 )) || { rm -rf "$tmp_dir"; die "macOS native inject: в base jar нашёл только $native_count native-lib, ожидал минимум 3."; }
-  (cd "$extract_dir" && zip -q -r "$out_jar" .)
+  done < <(list_zip_entries "$mac_base_jar" 2>/dev/null \
+    | grep -E '(^|/)(lib[^/]*|openal)\.(dylib|jnilib)$' \
+    | grep -v '^macos/' \
+    | grep -v '^META-INF/')
+  native_count="$(find "$extract_dir" -type f \( -name '*.dylib' -o -name '*.jnilib' \) 2>/dev/null | wc -l | tr -d '[:space:]')"
+  info_msg "macOS native inject: найдено ${native_count} native-lib в base jar."
+  if (( native_count > 0 )); then
+    (cd "$extract_dir" && zip -q -r "$out_jar" .)
+  fi
   unzip -tqq "$out_jar" >/dev/null
   rm -rf "$tmp_dir"
 }
