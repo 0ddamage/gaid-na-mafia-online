@@ -1,7 +1,5 @@
 ![](_core/assets/public3.png)
 
-![](_core/assets/public13.png)
-
 ![](_core/assets/public1.png)
 
 ![](_core/assets/public2.png)
