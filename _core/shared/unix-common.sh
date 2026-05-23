@@ -1076,7 +1076,7 @@ cleanup_game_debug_logs() {
   local game_dir log_path removed
   game_dir="$(dirname "$live_jar")"
   removed=0
-  for log_path in "$game_dir/match-night-live.log" "$game_dir/mn.log"; do
+  for log_path in "$game_dir/startup-crash.log" "$game_dir/match-night-live.log" "$game_dir/mn.log"; do
     if [[ -e "$log_path" ]]; then
       rm -f "$log_path" 2>/dev/null || : >"$log_path" 2>/dev/null || true
       if [[ ! -e "$log_path" || ! -s "$log_path" ]]; then
