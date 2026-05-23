@@ -717,6 +717,48 @@ jar_has_overlay_patch_entries() {
   local jar_file="$1"
   list_zip_entries "$jar_file" 2>/dev/null | grep -E -q '^(com/kartuzov/mafiaonline/SvPanelRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/UiTextInputRuntime(\$.*)?\.class|com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/r1\.dat|com/kartuzov/mafiaonline/r2\.bin)$'
 }
+build_macos_addonly_overlay() {
+  local base_jar="$1"
+  local bundled_patched="$2"
+  local out_jar="$3"
+  local tmp_dir extract_dir base_entries bundled_entries new_entries new_count entry
+  command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS установки.'
+  command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS установки.'
+  [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
+  [[ -f "$bundled_patched" ]] || die "Bundled patched jar не найден: $bundled_patched"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/repackgender-macos-addonly.XXXXXX")"
+  extract_dir="$tmp_dir/extract"
+  base_entries="$tmp_dir/base.txt"
+  bundled_entries="$tmp_dir/bundled.txt"
+  new_entries="$tmp_dir/new.txt"
+  mkdir -p "$extract_dir" "$(dirname "$out_jar")"
+  list_zip_entries "$base_jar" 2>/dev/null | LC_ALL=C sort -u > "$base_entries"
+  list_zip_entries "$bundled_patched" 2>/dev/null | LC_ALL=C sort -u > "$bundled_entries"
+  LC_ALL=C comm -23 "$bundled_entries" "$base_entries" \
+    | grep -vE '\.(dll|so)$' \
+    | grep -vE '^windows/|^linux/|^macos/|^META-INF/' \
+    | grep -v '/$' \
+    > "$new_entries" 2>/dev/null || true
+  new_count="$(wc -l < "$new_entries" 2>/dev/null | tr -d '[:space:]')"
+  [[ -z "$new_count" ]] && new_count=0
+  info_msg "macOS overlay: добавляю $new_count новых entries (без замены существующих)."
+  cp -f "$base_jar" "$out_jar"
+  chmod u+w "$out_jar" >/dev/null 2>&1 || true
+  if (( new_count > 0 )); then
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+      [[ -n "$entry" ]] || continue
+      case "$entry" in
+        /*|*'..'*) rm -rf "$tmp_dir"; die "macOS overlay: небезопасный entry: $entry" ;;
+      esac
+      unzip -qq "$bundled_patched" "$entry" -d "$extract_dir" 2>/dev/null || true
+    done < "$new_entries"
+    if [[ -n "$(ls -A "$extract_dir" 2>/dev/null)" ]]; then
+      (cd "$extract_dir" && zip -q -r "$out_jar" .)
+    fi
+  fi
+  unzip -tqq "$out_jar" >/dev/null
+  rm -rf "$tmp_dir"
+}
 build_macos_native_injected_jar() {
   local mac_base_jar="$1"
   local bundled_patched="$2"
@@ -1155,8 +1197,8 @@ install_patch() {
   step_msg '3/5' 'Сборка patched jar...'
   if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
     if [[ "$OS_NAME" == "macos" ]]; then
-      info_msg 'macOS: release-payload + Mac native-libs из текущего jar.'
-      build_macos_native_injected_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+      info_msg 'macOS: add-only overlay (Mac jar + новые entries из release-payload, без замены).'
+      build_macos_addonly_overlay "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
     else
       cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
     fi
