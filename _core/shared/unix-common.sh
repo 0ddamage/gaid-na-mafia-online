@@ -721,8 +721,7 @@ build_macos_overlay_patched_jar() {
   local base_jar="$1"
   local bundled_patched="$2"
   local out_jar="$3"
-  local tmp_dir extract_dir entries_file entry_count entry
-  local overlay_regex='^(com/kartuzov/mafiaonline/.*|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$'
+  local tmp_dir extract_dir entries_file entry_count entry manifest_file overlay_regex
   command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS overlay-установки.'
   command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS overlay-установки.'
   [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
@@ -731,33 +730,27 @@ build_macos_overlay_patched_jar() {
   extract_dir="$tmp_dir/extract"
   entries_file="$tmp_dir/entries.txt"
   mkdir -p "$extract_dir" "$(dirname "$out_jar")"
-  
-  local manifest_file="$tmp_dir/manifest.txt"
+
+  manifest_file="$tmp_dir/manifest.txt"
   if unzip -p "$bundled_patched" "META-INF/repackgender_patch_manifest.txt" > "$manifest_file" 2>/dev/null; then
     sed -i '' 's/\r$//' "$manifest_file" 2>/dev/null || sed -i 's/\r$//' "$manifest_file" 2>/dev/null || true
-    local dynamic_regex="$(cat "$manifest_file" | sed 's/\./\\./g' | paste -sd '|' -)"
-    if [[ -n "$dynamic_regex" ]]; then
-      overlay_regex="^($dynamic_regex|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
-    else
-      overlay_regex="^(com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
+    sed -i '' '/^[[:space:]]*$/d' "$manifest_file" 2>/dev/null || sed -i '/^[[:space:]]*$/d' "$manifest_file" 2>/dev/null || true
+    if ! list_zip_entries "$bundled_patched" | grep -F -x -f "$manifest_file" | grep -F -x -v 'com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class' >"$entries_file"; then
+      rm -rf "$tmp_dir"
+      die 'macOS overlay: не удалось найти entries патча из manifest в release jar.'
     fi
   else
-    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class)$"
-  fi
-
-  if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
-    rm -rf "$tmp_dir"
-    die 'macOS overlay: не удалось найти entries патча в release jar.'
+    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/bg\.png|com/kartuzov/mafiaonline/HatChest1\.png|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/local_assets/.*)$"
+    if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
+      rm -rf "$tmp_dir"
+      die 'macOS overlay: не удалось найти entries патча в release jar.'
+    fi
   fi
   entry_count="$(wc -l <"$entries_file" | tr -d '[:space:]')"
   if (( entry_count < 20 )); then
     rm -rf "$tmp_dir"
     die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
   fi
-
-  # Удаляем платформозависимый Lwjgl3Window, скопированный с Windows, 
-  # чтобы он не крашил macOS WindowServer.
-  rm -f "$extract_dir/com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class"
 
   cp -f "$base_jar" "$out_jar"
   chmod u+w "$out_jar" >/dev/null 2>&1 || true
