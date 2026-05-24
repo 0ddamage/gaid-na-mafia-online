@@ -742,7 +742,7 @@ build_macos_overlay_patched_jar() {
       overlay_regex="^(com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
     fi
   else
-    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
+    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class)$"
   fi
 
   if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
@@ -754,6 +754,10 @@ build_macos_overlay_patched_jar() {
     rm -rf "$tmp_dir"
     die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
   fi
+
+  # Удаляем платформозависимый Lwjgl3Window, скопированный с Windows, 
+  # чтобы он не крашил macOS WindowServer.
+  rm -f "$extract_dir/com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class"
 
   cp -f "$base_jar" "$out_jar"
   chmod u+w "$out_jar" >/dev/null 2>&1 || true
