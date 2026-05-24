@@ -731,6 +731,20 @@ build_macos_overlay_patched_jar() {
   extract_dir="$tmp_dir/extract"
   entries_file="$tmp_dir/entries.txt"
   mkdir -p "$extract_dir" "$(dirname "$out_jar")"
+  
+  local manifest_file="$tmp_dir/manifest.txt"
+  if unzip -p "$bundled_patched" "META-INF/repackgender_patch_manifest.txt" > "$manifest_file" 2>/dev/null; then
+    sed -i '' 's/\r$//' "$manifest_file" 2>/dev/null || sed -i 's/\r$//' "$manifest_file" 2>/dev/null || true
+    local dynamic_regex="$(cat "$manifest_file" | sed 's/\./\\./g' | paste -sd '|' -)"
+    if [[ -n "$dynamic_regex" ]]; then
+      overlay_regex="^($dynamic_regex|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
+    else
+      overlay_regex="^(com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
+    fi
+  else
+    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$"
+  fi
+
   if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
     rm -rf "$tmp_dir"
     die 'macOS overlay: не удалось найти entries патча в release jar.'
@@ -740,27 +754,7 @@ build_macos_overlay_patched_jar() {
     rm -rf "$tmp_dir"
     die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
   fi
-  # Guard against partial overlays that mix incompatible obfuscation maps.
-  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/a.class' "$entries_file" && \
-     ! grep -Fxq 'com/kartuzov/mafiaonline/ik.class' "$entries_file"; then
-    rm -rf "$tmp_dir"
-    die 'macOS overlay: desktop/a.class выбран без ik.class. Установка остановлена (битая смесь классов).'
-  fi
-  if grep -Fxq 'com/kartuzov/mafiaonline/in.class' "$entries_file" && \
-     ! grep -Fxq 'com/kartuzov/mafiaonline/io.class' "$entries_file"; then
-    rm -rf "$tmp_dir"
-    die 'macOS overlay: in.class выбран без io.class. Установка остановлена (битая смесь классов).'
-  fi
-  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
-     ! grep -Fxq 'comicbd.ttf' "$entries_file"; then
-    rm -rf "$tmp_dir"
-    die 'macOS overlay: выбран DesktopLauncher.class, но нет comicbd.ttf. Установка остановлена (неполный overlay-ресурс).'
-  fi
-  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
-     ! grep -Fxq 'com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class' "$entries_file"; then
-    rm -rf "$tmp_dir"
-    die 'macOS overlay: выбран DesktopLauncher.class, но нет patched Lwjgl3Window.class. Установка остановлена.'
-  fi
+
   cp -f "$base_jar" "$out_jar"
   chmod u+w "$out_jar" >/dev/null 2>&1 || true
   zip -q -d "$out_jar" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' >/dev/null 2>&1 || true
