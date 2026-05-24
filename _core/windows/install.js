@@ -1,8 +1,8 @@
 var APP_ID = "1906220";
 
 var RELEASE_CERT_SHA256 = "fbf0ce154b5e4d873f5212bdef9aa3d7e61ac7ca496d1feadad47570b9a2e940";
-var PATCHER_JAR_SHA256 = "f2fde1297b6cfc0d7c49278f7e090e9239f1ddf4cfc05a7b829049ceafba4f9d";
-var PATCHER_SIG_SHA256 = "827c31f03f6f8eee99d0dcbeed3871008645f2fc763a0aa8d695e65e2281727f";
+var PATCHER_JAR_SHA256 = "f51c52ad44df1603b77663996092e7e4978e7426e900f14f1e24a7af9d09131b";
+var PATCHER_SIG_SHA256 = "3b9bdc3f280268bb08a68c9f89abf9e4e21b83580cf3ab3e567460f6899721fb";
 var CLEAN_HASH_FILE_SHA256 = "60baa4cca594d0e4077ab1a149a5bac2f48b64243e7d0973e78cabfa0697f354";
 
 var fso = new ActiveXObject("Scripting.FileSystemObject");
@@ -406,6 +406,30 @@ function verifyReleaseBundle() {
   verifyFileHash(PATCHER_SIG, PATCHER_SIG_SHA256, "patcher signature");
   verifyFileHash(CLEAN_HASH_FILE, CLEAN_HASH_FILE_SHA256, "clean.sha256");
   verifyReleaseManifest();
+}
+
+function resolveBundledPatchedJar() {
+  if (!fileExists(RELEASE_MANIFEST)) {
+    return "";
+  }
+  var lines = readLines(RELEASE_MANIFEST);
+  var candidate = "";
+  for (var i = 0; i < lines.length; i++) {
+    var line = trim(lines[i]);
+    var match = line.match(/^[0-9A-Fa-f]{64}\s+(_core\/bin\/repackgender-core-v[^\s]*-patched\.jar)$/);
+    if (!match) {
+      continue;
+    }
+    var parts = match[1].split("/");
+    var path = ROOT_DIR;
+    for (var p = 0; p < parts.length; p++) {
+      path = joinPath(path, parts[p]);
+    }
+    if (fileExists(path)) {
+      candidate = path;
+    }
+  }
+  return candidate;
 }
 
 function loadSupportedHashes() {
@@ -1305,6 +1329,34 @@ function installPatch(argLive, argClean) {
 
   step("2/7", "\u043f\u0440\u043e\u0432\u0435\u0440\u044f\u044e \u0430\u0440\u0445\u0438\u0432");
   verifyReleaseBundle();
+
+  var bundledPatched = resolveBundledPatchedJar();
+  if (bundledPatched) {
+    ensureFolder(BACKUP_DIR);
+    ensureFolder(parentDir(PATCHED_JAR));
+
+    var directTs = timestamp();
+    step("3/5", "using bundled v302 payload");
+    copyFileOverwrite(bundledPatched, PATCHED_JAR);
+
+    step("4/5", "\u0434\u0435\u043b\u0430\u044e \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u0443\u044e \u043a\u043e\u043f\u0438\u044e");
+    var directBackupTarget = joinPath(BACKUP_DIR, "live-before-install-" + directTs + ".jar");
+    copyWithRetries(liveJar, directBackupTarget, "create a live-file backup");
+
+    step("5/5", "\u043f\u043e\u0434\u043c\u0435\u043d\u044f\u044e \u043a\u043b\u0438\u0435\u043d\u0442");
+    copyWithRetries(PATCHED_JAR, liveJar, "replace the game file");
+    cleanupGameDebugLogs(liveJar);
+    deleteFile(PATCHED_JAR);
+
+    out("");
+    ok("\u043f\u0430\u0442\u0447 \u043f\u043e\u0441\u0442\u0430\u0432\u0438\u043b");
+
+    if (!steamWasRunning) {
+      launchSteamIfNeeded(false);
+      info("steam \u0431\u044b\u043b \u0437\u0430\u043a\u0440\u044b\u0442. \u043f\u0440\u043e\u0431\u0443\u044e \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u0435\u0433\u043e");
+    }
+    return;
+  }
 
   step("3/7", "\u0438\u0449\u0443 \u0434\u0436\u0430\u0432\u0443");
   ensureJava(liveJar);

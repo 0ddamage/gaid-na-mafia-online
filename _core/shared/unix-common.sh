@@ -622,11 +622,17 @@ use_bundled_patched_jar_for_install() {
   bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
   [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
   bundled_sha="$(sha256_of "$bundled_patched")"
+  if [[ "$OS_NAME" != "macos" ]]; then
+    DIRECT_PATCHED_JAR="$bundled_patched"
+    MACOS_OVERLAY_BASE_JAR=''
+    info_msg 'Использую bundled v302 payload: ставлю ровно release-версию клиента.'
+    return 0
+  fi
   base_jar="$live_jar"
-  if [[ "$live_sha" == "$bundled_sha" ]]; then
-    base_jar="$(find_macos_overlay_backup_base "$bundled_sha" || true)"
-    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл похож на несовместимый bundled jar, а подходящий backup не найден. Нужен оригинальный macOS MafiaOnline.jar или ручная Steam-проверка файлов.'
-    info_msg 'macOS: текущий live похож на прошлую неудачную установку; беру последний backup как macOS base.'
+  if [[ "$live_sha" == "$bundled_sha" ]] || jar_has_overlay_patch_entries "$live_jar"; then
+    base_jar="$(find_macos_restore_backup "$live_sha" 0 || find_macos_overlay_backup_base "$bundled_sha" || true)"
+    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл уже похож на модифицированный или несовместимый jar, а clean-like backup не найден. Нужен оригинальный macOS MafiaOnline.jar или ручная Steam-проверка файлов.'
+    info_msg 'macOS: текущий live похож на прошлую модифицированную установку; беру последний clean-like backup как macOS base.'
   fi
   DIRECT_PATCHED_JAR="$bundled_patched"
   MACOS_OVERLAY_BASE_JAR="$base_jar"
@@ -721,7 +727,8 @@ build_macos_overlay_patched_jar() {
   local base_jar="$1"
   local bundled_patched="$2"
   local out_jar="$3"
-  local tmp_dir extract_dir entries_file entry_count entry manifest_file overlay_regex
+  local tmp_dir extract_dir entries_file entry_count entry
+  local overlay_regex='^(com/kartuzov/mafiaonline/.*|com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window\.class|ui/.*|local_assets/.*|particle/.*|Audio/.*|[^/]+\.(png|jpg|jpeg|ttf|fnt|json|atlas|txt|pack|g3db|ser|pfx))$'
   command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Он нужен для macOS overlay-установки.'
   command -v zip >/dev/null 2>&1 || die 'Не найден zip. Он нужен для macOS overlay-установки.'
   [[ -f "$base_jar" ]] || die "macOS base jar не найден: $base_jar"
@@ -730,28 +737,36 @@ build_macos_overlay_patched_jar() {
   extract_dir="$tmp_dir/extract"
   entries_file="$tmp_dir/entries.txt"
   mkdir -p "$extract_dir" "$(dirname "$out_jar")"
-
-  manifest_file="$tmp_dir/manifest.txt"
-  if unzip -p "$bundled_patched" "META-INF/repackgender_patch_manifest.txt" > "$manifest_file" 2>/dev/null; then
-    sed -i '' 's/\r$//' "$manifest_file" 2>/dev/null || sed -i 's/\r$//' "$manifest_file" 2>/dev/null || true
-    sed -i '' '/^[[:space:]]*$/d' "$manifest_file" 2>/dev/null || sed -i '/^[[:space:]]*$/d' "$manifest_file" 2>/dev/null || true
-    if ! list_zip_entries "$bundled_patched" | grep -F -x -f "$manifest_file" | grep -F -x -v 'com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class' >"$entries_file"; then
-      rm -rf "$tmp_dir"
-      die 'macOS overlay: не удалось найти entries патча из manifest в release jar.'
-    fi
-  else
-    overlay_regex="^(com/kartuzov/mafiaonline/x1(\$.*)?\.class|com/kartuzov/mafiaonline/x2(\$.*)?\.class|com/kartuzov/mafiaonline/in\.class|com/kartuzov/mafiaonline/top1_wallpaper\.jpeg|com/kartuzov/mafiaonline/top2_wallpaper\.jpeg|com/kartuzov/mafiaonline/top4_wallpaper\.jpeg|com/kartuzov/mafiaonline/top_wallpaper\.jpeg|com/kartuzov/mafiaonline/bg\.png|com/kartuzov/mafiaonline/HatChest1\.png|com/kartuzov/mafiaonline/farm_questions\.csv|com/kartuzov/mafiaonline/local_assets/.*)$"
-    if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
-      rm -rf "$tmp_dir"
-      die 'macOS overlay: не удалось найти entries патча в release jar.'
-    fi
+  if ! list_zip_entries "$bundled_patched" | grep -E "$overlay_regex" >"$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: не удалось найти entries патча в release jar.'
   fi
   entry_count="$(wc -l <"$entries_file" | tr -d '[:space:]')"
   if (( entry_count < 20 )); then
     rm -rf "$tmp_dir"
     die "macOS overlay: найдено слишком мало entries патча ($entry_count). Установка остановлена."
   fi
-
+  # Guard against partial overlays that mix incompatible obfuscation maps.
+  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/a.class' "$entries_file" && \
+     ! grep -Fxq 'com/kartuzov/mafiaonline/ik.class' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: desktop/a.class выбран без ik.class. Установка остановлена (битая смесь классов).'
+  fi
+  if grep -Fxq 'com/kartuzov/mafiaonline/in.class' "$entries_file" && \
+     ! grep -Fxq 'com/kartuzov/mafiaonline/io.class' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: in.class выбран без io.class. Установка остановлена (битая смесь классов).'
+  fi
+  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
+     ! grep -Fxq 'comicbd.ttf' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: выбран DesktopLauncher.class, но нет comicbd.ttf. Установка остановлена (неполный overlay-ресурс).'
+  fi
+  if grep -Fxq 'com/kartuzov/mafiaonline/desktop/DesktopLauncher.class' "$entries_file" && \
+     ! grep -Fxq 'com/badlogic/gdx/backends/lwjgl3/Lwjgl3Window.class' "$entries_file"; then
+    rm -rf "$tmp_dir"
+    die 'macOS overlay: выбран DesktopLauncher.class, но нет patched Lwjgl3Window.class. Установка остановлена.'
+  fi
   cp -f "$base_jar" "$out_jar"
   chmod u+w "$out_jar" >/dev/null 2>&1 || true
   zip -q -d "$out_jar" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 'META-INF/*.EC' >/dev/null 2>&1 || true
@@ -995,10 +1010,8 @@ prepare_clean_jar() {
       return 0
     fi
   done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.jar' -print 2>/dev/null | sort -r)
-  if [[ "$OS_NAME" == "macos" ]]; then
-    if use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
-      return 0
-    fi
+  if use_bundled_patched_jar_for_install "$live_jar" "$live_sha"; then
+    return 0
   fi
   if prepare_macos_compat_clean_jar "$live_jar" "$live_sha"; then
     return 0
