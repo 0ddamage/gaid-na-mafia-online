@@ -618,26 +618,16 @@ use_bundled_patched_jar_for_install() {
   local live_sha="$2"
   local bundled_patched=''
   local bundled_sha=''
-  local base_jar=''
   bundled_patched="$(resolve_bundled_patched_jar 2>/dev/null || true)"
   [[ -n "$bundled_patched" && -f "$bundled_patched" ]] || return 1
   bundled_sha="$(sha256_of "$bundled_patched")"
-  if [[ "$OS_NAME" != "macos" ]]; then
-    DIRECT_PATCHED_JAR="$bundled_patched"
-    MACOS_OVERLAY_BASE_JAR=''
-    info_msg 'Использую bundled release payload: ставлю ровно release-версию клиента.'
-    return 0
-  fi
-  base_jar="$live_jar"
-  if [[ "$live_sha" == "$bundled_sha" ]] || jar_has_overlay_patch_entries "$live_jar"; then
-    base_jar="$(find_macos_restore_backup "$live_sha" 0 || find_macos_overlay_backup_base "$bundled_sha" || true)"
-    [[ -n "$base_jar" && -f "$base_jar" ]] || die 'macOS: текущий live-файл уже похож на модифицированный или несовместимый jar, а clean-like backup не найден. Нужен оригинальный macOS MafiaOnline.jar или ручная Steam-проверка файлов.'
-    info_msg 'macOS: текущий live похож на прошлую модифицированную установку; беру последний clean-like backup как macOS base.'
-  fi
   DIRECT_PATCHED_JAR="$bundled_patched"
-  MACOS_OVERLAY_BASE_JAR="$base_jar"
-  info_msg 'macOS: clean-клиент не совпал с поддерживаемыми Windows/Proton SHA.'
-  info_msg 'macOS: Steam-проверку не запускаю; сохраняю macOS native-содержимое и накладываю release-патч.'
+  MACOS_OVERLAY_BASE_JAR=''
+  if [[ "$OS_NAME" == "macos" ]]; then
+    info_msg 'macOS: использую bundled release payload с прямой заменой jar.'
+  else
+    info_msg 'Использую bundled release payload: ставлю ровно release-версию клиента.'
+  fi
   return 0
 }
 steam_is_running() {
@@ -1070,6 +1060,35 @@ run_patcher() {
   fi
   rm -f "$tmp_log" "$log_file"
 }
+ensure_macos_required_native_libs() {
+  local source_jar="$1"
+  local target_jar="$2"
+  local entry='libgdx64.dylib'
+  local tmp_dir src_extract target_extract
+  [[ "$OS_NAME" == "macos" ]] || return 0
+  [[ -f "$source_jar" && -f "$target_jar" ]] || return 0
+  if list_zip_entries "$target_jar" 2>/dev/null | grep -Fxq "$entry"; then
+    return 0
+  fi
+  if ! list_zip_entries "$source_jar" 2>/dev/null | grep -Fxq "$entry"; then
+    die "macOS: в исходном клиенте не найден обязательный native-файл $entry"
+  fi
+  command -v unzip >/dev/null 2>&1 || die 'Не найден unzip. Нужен для добавления macOS native-библиотеки.'
+  command -v zip >/dev/null 2>&1 || die 'Не найден zip. Нужен для добавления macOS native-библиотеки.'
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/repackgender-macos-native.XXXXXX")"
+  src_extract="$tmp_dir/src"
+  target_extract="$tmp_dir/target"
+  mkdir -p "$src_extract" "$target_extract"
+  unzip -qq "$source_jar" "$entry" -d "$src_extract"
+  cp -f "$target_jar" "$target_extract/client.jar"
+  (
+    cd "$src_extract"
+    zip -q "$target_extract/client.jar" "$entry"
+  )
+  mv -f "$target_extract/client.jar" "$target_jar"
+  rm -rf "$tmp_dir"
+  info_msg "macOS: добавил обязательный native-файл $entry в patched jar."
+}
 cleanup_install_logs() {
   mkdir -p "$LOG_DIR"
   find "$LOG_DIR" -maxdepth 1 -type f -name 'install-*.log' -delete 2>/dev/null || true
@@ -1115,12 +1134,8 @@ install_patch() {
   log_file="$LOG_DIR/install-$ts.log"
   step_msg '3/5' 'Сборка patched jar...'
   if [[ -n "$DIRECT_PATCHED_JAR" ]]; then
-    if [[ "$OS_NAME" == "macos" ]]; then
-      info_msg 'macOS: собираю patched jar через overlay (release-payload + macOS base).'
-      build_macos_overlay_patched_jar "$MACOS_OVERLAY_BASE_JAR" "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
-    else
-      cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
-    fi
+    cp -f "$DIRECT_PATCHED_JAR" "$PATCHED_JAR"
+    ensure_macos_required_native_libs "$live_jar" "$PATCHED_JAR"
   else
     run_patcher "$CLEAN_JAR" "$PATCHED_JAR" "$log_file"
   fi
