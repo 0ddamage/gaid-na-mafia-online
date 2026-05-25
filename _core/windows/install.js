@@ -3,7 +3,7 @@ var APP_ID = "1906220";
 var RELEASE_CERT_SHA256 = "fbf0ce154b5e4d873f5212bdef9aa3d7e61ac7ca496d1feadad47570b9a2e940";
 var PATCHER_JAR_SHA256 = "55cbdc8dc5678d390e8fbdefea36856bacd44be5055d2b5cdda4581525d10cbb";
 var PATCHER_SIG_SHA256 = "6bf7d23e09e3bc988150413c75818a753d3b167f472b124a236fa4e47243e425";
-var CLEAN_HASH_FILE_SHA256 = "60baa4cca594d0e4077ab1a149a5bac2f48b64243e7d0973e78cabfa0697f354";
+var CLEAN_HASH_FILE_SHA256 = "91765a15f2df925481ec336fa58bf949049dba9300d2689a2c32bbb48fabbd80";
 
 var fso = new ActiveXObject("Scripting.FileSystemObject");
 var shell = new ActiveXObject("WScript.Shell");
