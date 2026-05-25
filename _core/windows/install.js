@@ -1,9 +1,9 @@
 var APP_ID = "1906220";
 
 var RELEASE_CERT_SHA256 = "fbf0ce154b5e4d873f5212bdef9aa3d7e61ac7ca496d1feadad47570b9a2e940";
-var PATCHER_JAR_SHA256 = "f8b57e0411a2bbbc09a7a1eeede1f3eac8b0ec08261d3d4603d10fc7214fedfd";
-var PATCHER_SIG_SHA256 = "ba91713383b13de59869f1cb2b1bd7f116e8aed4285156a78956da6bd910ee67";
-var CLEAN_HASH_FILE_SHA256 = "91765a15f2df925481ec336fa58bf949049dba9300d2689a2c32bbb48fabbd80";
+var PATCHER_JAR_SHA256 = "6db5d3d58ce96ad2ee1f2c4e64f24978edbc017fae0fbf9b9e048a75996eb6a5";
+var PATCHER_SIG_SHA256 = "1d95704ae35fea7789adc48853aae77db6391d8636e956e262aae56965c635a9";
+var CLEAN_HASH_FILE_SHA256 = "60baa4cca594d0e4077ab1a149a5bac2f48b64243e7d0973e78cabfa0697f354";
 
 var fso = new ActiveXObject("Scripting.FileSystemObject");
 var shell = new ActiveXObject("WScript.Shell");
@@ -1336,7 +1336,7 @@ function installPatch(argLive, argClean) {
     ensureFolder(parentDir(PATCHED_JAR));
 
     var directTs = timestamp();
-    step("3/5", "using bundled v302 payload");
+    step("3/5", "using bundled release payload");
     copyFileOverwrite(bundledPatched, PATCHED_JAR);
 
     step("4/5", "\u0434\u0435\u043b\u0430\u044e \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u0443\u044e \u043a\u043e\u043f\u0438\u044e");

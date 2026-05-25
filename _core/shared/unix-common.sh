@@ -625,7 +625,7 @@ use_bundled_patched_jar_for_install() {
   if [[ "$OS_NAME" != "macos" ]]; then
     DIRECT_PATCHED_JAR="$bundled_patched"
     MACOS_OVERLAY_BASE_JAR=''
-    info_msg 'Использую bundled v302 payload: ставлю ровно release-версию клиента.'
+    info_msg 'Использую bundled release payload: ставлю ровно release-версию клиента.'
     return 0
   fi
   base_jar="$live_jar"
